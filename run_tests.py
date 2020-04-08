@@ -7,17 +7,27 @@ output_end = "_output"
 input_end = "_input"
 file_end = ".txt"
 
-for i in range(12):
+for i in range(21):
     f = open(path + file_begin + "{:02d}".format(i) + input_end + file_end, "r")
 
+    print("For file " + str(i) + ":")
     try:
         output = exercise.test_lines(f.readlines())
     except Exception as e:
-        output = "Exception ocurred -> " + str(e.args) + "\n"
+        print("Exception ocurred -> " + str(e.args) + "\n")
+        continue
 
     expected_output = open(path + file_begin + "{:02d}".format(i) + output_end + file_end, "r").read()
+    test_result = "PASSED"
+    print("For file " + str(i) + ":")
+    for line, (g_line, e_line) in enumerate(zip(output.split('\n'), expected_output.split('\n'))):
 
-    result = output == expected_output
+        line_result = e_line == g_line
+        if line_result and e_line == "":
+            break
+        if not line_result:
+            test_result = "FAILED"
 
-    print("For file " + str(i) + ":\n" + "Expected:   " + expected_output + "Got:        " + output + "Result: " + str(result) + "\n")
+        print('\tL' + str(line) + "-Expected:  " + e_line + "\n\tL" + str(line) + "-Got:       " + g_line + "\n\t\tResult: " + str(line_result))
 
+    print("TEST " + test_result + '\n')
