@@ -6,8 +6,10 @@ file_begin = "T"
 output_end = "_output"
 input_end = "_input"
 file_end = ".txt"
+failed_tests = []
+tests = range(21)
 
-for i in range(21):
+for i in tests:
     f = open(path + file_begin + "{:02d}".format(i) + input_end + file_end, "r")
 
     print("For file " + str(i) + ":")
@@ -15,6 +17,7 @@ for i in range(21):
         output = exercise.test_lines(f.readlines())
     except Exception as e:
         print("Exception ocurred -> " + str(e.args) + "\n")
+        failed_tests.append(i)
         continue
 
     expected_output = open(path + file_begin + "{:02d}".format(i) + output_end + file_end, "r").read()
@@ -31,3 +34,6 @@ for i in range(21):
         print('\tL' + str(line) + "-Expected:  " + e_line + "\n\tL" + str(line) + "-Got:       " + g_line + "\n\t\tResult: " + str(line_result))
 
     print("TEST " + test_result + '\n')
+    if test_result == "FAILED":
+        failed_tests.append(i)
+print("RESULT: (" + str(len(tests) - len(failed_tests)) + "/" + str(len(tests)) + ")\tFAILED: " + str(failed_tests))

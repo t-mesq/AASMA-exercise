@@ -108,7 +108,7 @@ class Society:
         self.agent_options = {"restart": 0, "cycle": 1, "memory-factor": 0.0, "decision": "rationale", "verbose": False}
         self.decisions = {
             "mono-society": {
-                "perceive": self.__heterogeneous_perceive,
+                "perceive": self.__mono_perceive,
                 "recharge": self.__mono_recharge
             },
             "homogeneous-society": {
@@ -139,12 +139,14 @@ class Society:
         for agent in self.agents:
             self.agents[agent] = Agent(dict_to_string(self.agent_options, separator=" ").split(' '))
 
-    def __homogeneous_perceive(self, task_ID, assignment):
+    def __mono_perceive(self, task_ID, assignment):
+        self.agents[task_ID].perceive("A " + assignment)
+
+    def __homogeneous_perceive(self, _, assignment):
         task, utility = assignment.split("=", 1)
         self.perceived.append(float(utility))
         if len(self.perceived) == len(self.agents):
             average = sum(self.perceived) / len(self.perceived)
-            self.perceived = []
             for _, agent in self.agents.items():
                 agent.perceive("A u=" + str(average))
 
@@ -172,6 +174,7 @@ class Society:
                 agent.perceive(input)
 
     def decide_act(self):
+        self.perceived = []
         for _, agent in self.agents.items():
             agent.decide_act()
 
