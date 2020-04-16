@@ -12,7 +12,7 @@ tests = range(21)
 for i in tests:
     f = open(path + file_begin + "{:02d}".format(i) + input_end + file_end, "r")
 
-    print("For file " + str(i) + ":")
+    print("FOR TEST " + str(i) + ":")
     try:
         output = exercise.test_lines(f.readlines())
     except Exception as e:
@@ -22,7 +22,6 @@ for i in tests:
 
     expected_output = open(path + file_begin + "{:02d}".format(i) + output_end + file_end, "r").read()
     test_result = "PASSED"
-    print("For file " + str(i) + ":")
     for line, (g_line, e_line) in enumerate(zip(output.split('\n'), expected_output.split('\n'))):
 
         line_result = e_line == g_line

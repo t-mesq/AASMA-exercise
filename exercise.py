@@ -1,5 +1,8 @@
+import collections
 import sys
 import math
+
+from itertools import product
 
 
 def standard_output(text):
@@ -15,8 +18,8 @@ def weighted_average(weights_n_values, discount_factor):
     weighted_values = 0
     weighted_sum = sum(map(lambda x: x ** discount_factor, weights_n_values.keys()))
     for weight, value in weights_n_values.items():
-        weighted_values += (value * (weight ** discount_factor)) / weighted_sum
-    return weighted_values
+        weighted_values += (value * (weight ** discount_factor))
+    return weighted_values / weighted_sum
 
 
 def get_coefficients(negative_utility, positive_utility):
@@ -120,13 +123,15 @@ class Society:
                 "recharge": self.__geneous_recharge
             }
         }
-        self.options = {"decision": self.decisions["mono-society"]}
-        self.perceived = []
+        self.options = {"decision": self.decisions["mono-society"], "concurrency-penalty": 0}
+        self.tasks = []
+        self.picked_tasks = []
+        self.perceived = collections.defaultdict(list)
         agent_decisions = ("rationale", "flexible")
         for assignment in options:
             option, value = assignment.split("=", 1)
             if option == "agents":
-                agent_list = value.replace("{", "").replace("{", "").replace("[", "").replace("]", "").split(",")
+                agent_list = value.replace("{", "").replace("}", "").replace("[", "").replace("]", "").split(",")
                 self.agents = dict.fromkeys(agent_list, None)
             elif option in self.options:
                 if option == "decision":
@@ -134,21 +139,27 @@ class Society:
                         self.options[option] = self.decisions[value]
                     elif value in agent_decisions:
                         self.agent_options[option] = value
+                else:
+                    self.options[option] = eval(value, {})
             else:
                 self.agent_options[option] = eval(value, {})
         for agent in self.agents:
             self.agents[agent] = Agent(dict_to_string(self.agent_options, separator=" ").split(' '))
 
+
     def __mono_perceive(self, task_ID, assignment):
         self.agents[task_ID].perceive("A " + assignment)
 
-    def __homogeneous_perceive(self, _, assignment):
+    def __homogeneous_perceive(self, task_ID, assignment):
         task, utility = assignment.split("=", 1)
-        self.perceived.append(float(utility))
-        if len(self.perceived) == len(self.agents):
-            average = sum(self.perceived) / len(self.perceived)
-            for _, agent in self.agents.items():
-                agent.perceive("A u=" + str(average))
+        self.perceived[self.picked_tasks[task_ID]].append(float(utility))
+        if sum([len(v) for v in self.perceived.values()]) == len(self.agents):
+            task_averages = {}
+            for task, utilities in self.perceived.items():
+                task_averages[task] = sum(utilities) / len(utilities)
+            self.perceived = collections.defaultdict(list)
+            for agent_ID, agent in self.agents.items():
+                agent.perceive("A u=" + str(task_averages[self.picked_tasks[agent_ID]]))
 
     def __heterogeneous_perceive(self, task_ID, assignment):
         self.agents[task_ID].perceive("A " + assignment)
@@ -164,19 +175,47 @@ class Society:
             agents_recharge["gain"] += agent_recharge["gain"]
         return agents_recharge
 
+    def __get_best_combination(self):
+        raw_gains_matrix = [[0 for t in self.tasks] for a in self.agents]
+        discounted_gains_matrix = [[0 for t in self.tasks] for a in self.agents]
+
+        for agent_index, agent_ID in enumerate(self.agents):
+            agent = self.agents[agent_ID]
+            for task_index, task in enumerate(self.tasks):
+                raw_gains_matrix[agent_index][task_index] = agent.get_task_expected_gain(task)
+                discounted_gains_matrix[agent_index][task_index] = agent.get_task_expected_gain(task, self.options["concurrency-penalty"])
+
+        biggest_gain = -math.inf
+        for combination in product(self.tasks, repeat=len(self.agents)):
+            combination_gain = 0
+            for agent_index, task in enumerate(combination):
+                gains_matrix = discounted_gains_matrix if combination.count(task) > 1 else raw_gains_matrix
+                combination_gain += gains_matrix[agent_index][self.tasks.index(task)]
+            if combination_gain > biggest_gain:
+                biggest_gain = combination_gain
+                best_combination = combination
+
+        return {k: v for k, v in zip(self.agents, best_combination)}
+
     def perceive(self, input):
         task_ID, assignment = input.split()
 
         if task_ID in self.agents:
             self.options["decision"]["perceive"](task_ID, assignment)
         else:
+            self.tasks.append(task_ID)
             for _, agent in self.agents.items():
                 agent.perceive(input)
 
     def decide_act(self):
-        self.perceived = []
-        for _, agent in self.agents.items():
-            agent.decide_act()
+        self.picked_tasks = {}
+        if self.options["concurrency-penalty"] > 0:
+            self.picked_tasks = self.__get_best_combination()
+            for agent_ID, agent in self.agents.items():
+                agent.override_decide_act(self.picked_tasks[agent_ID])
+        else:
+            for agent_ID, agent in self.agents.items():
+                self.picked_tasks[agent_ID] = agent.decide_act()
 
     def recharge(self):
         return self.options["decision"]["recharge"]()
@@ -190,6 +229,7 @@ class Agent:
         self.executed_tasks = set()
         self.gain = 0
         self.tick = 0
+        self.weighted_average_utilities = None
         self.options = {"restart": 0, "cycle": 1, "memory-factor": 0.0, "verbose": False}
         traits = {"rationale": "rationale", "flexible": "flexible"}
 
@@ -235,12 +275,33 @@ class Agent:
                         output_to("{" + most_utility_pos_task + "=" + "{:.2f}".format(1 - round_half_up(most_flexible_cofs[0], 2)) + "," +
                                   most_flexible_task + "=" + "{:.2f}".format(round_half_up(most_flexible_cofs[0], 2)) + '}\n')
                     self.expected_wait = max(self.options["restart"] - 1, 0)
+                    self.tick += 1
                     return True
         return False
+
+    def __get_weighted_average_utilities(self):
+        if self.weighted_average_utilities is None:
+            self.weighted_average_utilities = {k: weighted_average(v, self.options["memory-factor"]) for k, v in self.tasks["u"].items()}
+        return self.weighted_average_utilities
+
+    def __set_task_in_execution(self, task):
+        if self.tasks_in_execution is None or list(self.tasks_in_execution)[0] != task:
+            self.tasks_in_execution = {task: 1.0}
+            self.expected_wait = self.options["restart"]
+
+    def get_task_expected_gain(self, task, penalty=0):
+        usable_time = self.options["cycle"] - self.tick - (self.expected_wait if self.tasks_in_execution is not None and list(self.tasks_in_execution)[0] == task else self.options["restart"])
+        return (self.__get_weighted_average_utilities()[task] - penalty) * usable_time
+
+    def override_decide_act(self, task):
+        self.__set_task_in_execution(task)
+        self.expected_wait = max(self.expected_wait - 1, 0)  # update wait
+        self.tick += 1
 
     def perceive(self, input):
         task_ID, assignment = input.split()
         info, value = assignment.split("=", 1)
+        self.weighted_average_utilities = None
 
         if task_ID == "A":
             if value[0] != "{":
@@ -271,14 +332,12 @@ class Agent:
                 print("\tagent assigned task " + task_ID + " with utility " + value)
 
     def decide_act(self):
-        self.tick += 1
-        if self.options["cycle"] - self.tick < self.options["restart"]:  # no point in changing
+        if self.options["cycle"] - self.tick < self.options["restart"] - 1:  # no point in changing
+            self.tick += 1
             return
 
-        weighted_average_utilities = {k: weighted_average(v, self.options["memory-factor"]) for k, v in
-                                      self.tasks["u"].items()}
-        most_utility_task = max(weighted_average_utilities,
-                                key=weighted_average_utilities.get)  # get task with most utility
+        weighted_average_utilities = self.__get_weighted_average_utilities()
+        most_utility_task = max(weighted_average_utilities,key=weighted_average_utilities.get)  # get task with most utility
 
         if not self.__try_flexible_decision(weighted_average_utilities, most_utility_task):
 
@@ -286,20 +345,28 @@ class Agent:
             could_switch = should_switch or most_utility_task != list(self.tasks_in_execution)[0]
 
             if could_switch and not should_switch:
-                expected_gain = weighted_average_utilities[list(self.tasks_in_execution)[0]] * (self.options["cycle"] - self.tick - self.expected_wait + 1)
-                possible_gain = weighted_average_utilities[most_utility_task] * (self.options["cycle"] - self.tick - self.options["restart"] + 1)
+                expected_gain = self.get_task_expected_gain(list(self.tasks_in_execution)[0])
+                possible_gain = self.get_task_expected_gain(most_utility_task)
                 should_switch = (expected_gain < possible_gain) or ((expected_gain == possible_gain) and (most_utility_task < list(self.tasks_in_execution)[0]))
 
             if should_switch:
                 if self.options["verbose"]:
-                    print("\tagent switched task " + str(list(self.tasks_in_execution)[0]) + " with task " + most_utility_task)
-                self.tasks_in_execution = {most_utility_task: 1.0}
-                self.expected_wait = max(self.options["restart"] - 1, 0)
+                    if self.tasks_in_execution is None:
+                        print("\tagent started with task " + most_utility_task)
+                    else:
+                        print("\tagent switched task " + str(list(self.tasks_in_execution)[0]) + " with task " + most_utility_task)
+                self.__set_task_in_execution(most_utility_task)
 
             else:
                 if self.options["verbose"]:
                     print("\tagent maintained task " + list(self.tasks_in_execution)[0])
-                self.expected_wait = max(self.expected_wait - 1, 0)  # update wait
+
+            self.expected_wait = max(self.expected_wait - 1, 0)  # update wait
+            self.tick += 1
+
+        if self.tasks_in_execution is not None and self.expected_wait == 0:
+            return str(list(self.tasks_in_execution)[0])
+        return None
 
     def recharge(self):
         return {"state": {k: weighted_average(v, self.options["memory-factor"]) if k in self.executed_tasks else "NA" for k, v in self.tasks["u"].items()}, "gain": self.gain}
