@@ -19,7 +19,7 @@ def weighted_average(weights_n_values, discount_factor):
     weighted_sum = sum(map(lambda x: x ** discount_factor, weights_n_values.keys()))
     for weight, value in weights_n_values.items():
         weighted_values += (value * (weight ** discount_factor))
-    return weighted_values / weighted_sum
+    return 0 if weighted_sum == 0 else weighted_values / weighted_sum
 
 
 def get_coefficients(negative_utility, positive_utility):
@@ -125,7 +125,7 @@ class Society:
         }
         self.options = {"decision": self.decisions["mono-society"], "concurrency-penalty": 0}
         self.tasks = []
-        self.picked_tasks = []
+        self.picked_tasks = {}
         self.perceived = collections.defaultdict(list)
         agent_decisions = ("rationale", "flexible")
         for assignment in options:
@@ -159,7 +159,14 @@ class Society:
                 task_averages[task] = sum(utilities) / len(utilities)
             self.perceived = collections.defaultdict(list)
             for agent_ID, agent in self.agents.items():
-                agent.perceive("A u=" + str(task_averages[self.picked_tasks[agent_ID]]))
+                tasks_left = task_averages.copy()
+                current_task_average = tasks_left.pop(self.picked_tasks[agent_ID])
+                agent.perceive("A u=" + str(current_task_average))
+                if tasks_left:
+                    agent.perceive("A u={" + dict_to_string(tasks_left) + "}")
+
+
+
 
     def __heterogeneous_perceive(self, task_ID, assignment):
         self.agents[task_ID].perceive("A " + assignment)
@@ -240,7 +247,7 @@ class Agent:
     def __try_flexible_decision(self, weighted_average_utilities, most_utility_task):
         if self.options["decision"] == "flexible":
             weighted_average_pos_utilities = {k: weighted_average_utilities[k] for k, v in
-                                              self.tasks["u"].items() if min(v.values()) >= 0}
+                                              self.tasks["u"].items() if min(v.values()) > 0}
             if len(weighted_average_pos_utilities) != 0:
                 # if there are positive utility tasks, try flexible decision
                 most_utility_pos_task = max(weighted_average_pos_utilities,
@@ -318,7 +325,8 @@ class Agent:
                 assignments = value.replace("{", "").replace("}", "").split(",")
                 for assignment in assignments:
                     task_ID, value = assignment.split("=", 1)
-                    self.gain += float(value) * self.tasks_in_execution[task_ID]
+                    if self.options["decision"] == "flexible":
+                        self.gain += float(value) * self.tasks_in_execution[task_ID]
                     if task_ID not in self.executed_tasks:
                         self.executed_tasks.add(task_ID)
                         self.tasks[info][task_ID] = {}
@@ -383,8 +391,6 @@ test_channel = ""
 def main():
     global output_to
     output_to = standard_output
-
-    # print(string_to_dict("cycle=5 agents={A1=2,A2=fsf} decision=society restart=0", separator=" ",inner_dict_transform=string_to_dict))
     line = sys.stdin.readline()
     society = Society(line.split(' '))
     for line in sys.stdin:
